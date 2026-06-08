@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BillPro</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <style>
     :root {
       --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -35,6 +36,61 @@
 
     button, input, select { font: inherit; }
     button { border: 0; }
+
+    body.auth-locked .app { display: none; }
+
+    .auth-screen {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: linear-gradient(135deg, #f6f9fc 0%, #e8f1fb 100%);
+    }
+
+    body:not(.auth-locked) .auth-screen { display: none; }
+
+    .auth-card {
+      width: min(420px, 100%);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      padding: 26px;
+    }
+
+    .auth-card .logo { margin-bottom: 16px; }
+    .auth-card h1 { font-size: 24px; margin-bottom: 6px; }
+    .auth-card p { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+    .auth-card .form-group { margin-bottom: 12px; }
+
+    .auth-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .auth-actions .btn { flex: 1; }
+
+    .auth-hint {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .user-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
 
     .app {
       display: grid;
@@ -761,7 +817,25 @@
     }
   </style>
 </head>
-<body>
+<body class="auth-locked">
+  <section class="auth-screen">
+    <div class="auth-card">
+      <div class="logo"><span class="logo-mark"><i class="ti ti-receipt-2"></i></span>Bill<span>Pro</span></div>
+      <h1 id="auth-title">Login</h1>
+      <p id="auth-copy">Apna username aur password daal kar billing app open karein.</p>
+      <div class="form-group"><label>Login ID</label><input type="text" id="auth-user" autocomplete="username" placeholder="e.g. shopadmin"></div>
+      <div class="form-group" id="auth-email-row" style="display:none"><label>Email</label><input type="email" id="auth-email" autocomplete="email" placeholder="name@example.com"></div>
+      <div class="form-group"><label>Password</label><input type="password" id="auth-pass" autocomplete="current-password" placeholder="Password"></div>
+      <div class="form-group" id="auth-otp-row" style="display:none"><label>OTP</label><input type="text" id="auth-otp" inputmode="numeric" placeholder="6 digit OTP"></div>
+      <div class="auth-actions">
+        <button class="btn primary" id="auth-main-btn" onclick="login()">Login</button>
+        <button class="btn" id="auth-switch-btn" onclick="setAuthMode('signup')">Create ID</button>
+      </div>
+      <button class="link-btn" id="forgot-btn" style="margin-top:12px" onclick="setAuthMode('forgot')">Forgot password?</button>
+      <div class="auth-hint">GitHub Pages par ye basic browser login hai. Real secure multi-user login ke liye Firebase/Supabase ya backend connect karna padega.</div>
+    </div>
+  </section>
+
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
@@ -787,6 +861,10 @@
         <div>
           <h1 id="page-title">Dashboard</h1>
           <p id="page-subtitle">Business ka quick snapshot</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="user-pill"><i class="ti ti-user-circle"></i><span id="current-user-label"></span></span>
+          <button class="btn sm" onclick="logout()"><i class="ti ti-logout"></i>Logout</button>
         </div>
       </header>
 
@@ -1005,7 +1083,19 @@
     let activeLedgerCustomer = '';
     let activeInvoice = null;
 
-    const store = {
+    const AUTH_USERS_KEY = 'billpro-users-v1';
+    const AUTH_SESSION_KEY = 'billpro-current-user-v1';
+    const EMAILJS_PUBLIC_KEY = 'PASTE_EMAILJS_PUBLIC_KEY';
+    const EMAILJS_SERVICE_ID = 'PASTE_EMAILJS_SERVICE_ID';
+    const EMAILJS_TEMPLATE_ID = 'PASTE_EMAILJS_TEMPLATE_ID';
+    const currentUser = localStorage.getItem(AUTH_SESSION_KEY);
+    const STORAGE_KEY = currentUser ? `billpro-data-v1:${currentUser}` : 'billpro-data-v1:guest';
+    let authMode = 'login';
+    let resetOtp = null;
+    let resetOtpUser = null;
+    let resetOtpExpiresAt = 0;
+
+    const defaultStore = {
       sales: [
         { invoiceNo: 'INV-001', party: 'Rahul Enterprises', phone: '9876543210', date: '2026-06-01', due: '2026-06-15', items: [{ name: 'Laptop', qty: 2, unit: 'pcs', price: 45000, gst: 18 }], status: 'paid', notes: '' },
         { invoiceNo: 'INV-002', party: 'Sharma Traders', phone: '9123456789', date: '2026-06-03', due: '2026-06-20', items: [{ name: 'Mobile', qty: 5, unit: 'pcs', price: 12000, gst: 18 }, { name: 'Charger', qty: 5, unit: 'pcs', price: 800, gst: 12 }], status: 'pending', notes: '' },
@@ -1036,7 +1126,187 @@
       ]
     };
 
+    const store = loadSavedStore();
     let invoiceCounters = { sale: 4, purchase: 3 };
+
+    function readUsers() {
+      try {
+        return JSON.parse(localStorage.getItem(AUTH_USERS_KEY) || '{}');
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function writeUsers(users) {
+      localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
+    }
+
+    function normalizeLoginId(value) {
+      return String(value || '').trim().toLowerCase().replace(/\s+/g, '-');
+    }
+
+    function encodePassword(value) {
+      return btoa(unescape(encodeURIComponent(String(value || ''))));
+    }
+
+    function isEmailJsConfigured() {
+      return ![EMAILJS_PUBLIC_KEY, EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID].some(v => String(v).startsWith('PASTE_'));
+    }
+
+    function setAuthMode(mode) {
+      authMode = mode;
+      const isSignup = mode === 'signup';
+      const isForgot = mode === 'forgot';
+      resetOtp = null;
+      resetOtpUser = null;
+      resetOtpExpiresAt = 0;
+      document.getElementById('auth-title').textContent = isForgot ? 'Reset Password with OTP' : (isSignup ? 'Create Login ID' : 'Login');
+      document.getElementById('auth-copy').textContent = isForgot ? 'Login ID daalein. OTP saved email par bheja jayega.' : (isSignup ? 'Naya login ID, email aur password bana kar app start karein.' : 'Apna username aur password daal kar billing app open karein.');
+      document.getElementById('auth-main-btn').textContent = isForgot ? 'Send OTP' : (isSignup ? 'Create Account' : 'Login');
+      document.getElementById('auth-main-btn').setAttribute('onclick', isForgot ? 'sendResetOtp()' : (isSignup ? 'createAccount()' : 'login()'));
+      document.getElementById('auth-switch-btn').textContent = (isSignup || isForgot) ? 'Back to Login' : 'Create ID';
+      document.getElementById('auth-switch-btn').setAttribute('onclick', (isSignup || isForgot) ? "setAuthMode('login')" : "setAuthMode('signup')");
+      document.getElementById('forgot-btn').style.display = isForgot ? 'none' : 'inline-flex';
+      document.getElementById('auth-email-row').style.display = isSignup ? 'flex' : 'none';
+      document.getElementById('auth-otp-row').style.display = 'none';
+      document.getElementById('auth-otp').value = '';
+    }
+
+    function createAccount() {
+      const username = normalizeLoginId(document.getElementById('auth-user').value);
+      const email = document.getElementById('auth-email').value.trim().toLowerCase();
+      const password = document.getElementById('auth-pass').value;
+      if (!username || !email || !password) { alert('Login ID, email aur password teeno daalein'); return; }
+      const users = readUsers();
+      if (users[username]) { alert('Ye login ID pehle se bana hua hai'); return; }
+      users[username] = { email, password: encodePassword(password), createdAt: new Date().toISOString() };
+      writeUsers(users);
+      localStorage.setItem(AUTH_SESSION_KEY, username);
+      location.reload();
+    }
+
+    function login() {
+      const username = normalizeLoginId(document.getElementById('auth-user').value);
+      const password = document.getElementById('auth-pass').value;
+      const users = readUsers();
+      if (!users[username] || users[username].password !== encodePassword(password)) {
+        alert('Login ID ya password galat hai');
+        return;
+      }
+      localStorage.setItem(AUTH_SESSION_KEY, username);
+      location.reload();
+    }
+
+    async function sendResetOtp() {
+      const username = normalizeLoginId(document.getElementById('auth-user').value);
+      const users = readUsers();
+      if (!users[username]) { alert('Ye login ID nahi mila'); return; }
+      if (!users[username].email) { alert('Is login ID me email saved nahi hai. Naya account email ke saath banayein.'); return; }
+      if (!isEmailJsConfigured()) {
+        alert('Email OTP bhejne ke liye pehle EmailJS public key, service ID aur template ID file me set karein.');
+        return;
+      }
+      resetOtp = String(Math.floor(100000 + Math.random() * 900000));
+      resetOtpUser = username;
+      resetOtpExpiresAt = Date.now() + 10 * 60 * 1000;
+      try {
+        emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+          to_email: users[username].email,
+          to_name: username,
+          otp: resetOtp,
+          app_name: 'BillPro'
+        });
+        document.getElementById('auth-copy').textContent = `OTP ${users[username].email} par bhej diya gaya. OTP aur naya password daalein.`;
+        document.getElementById('auth-otp-row').style.display = 'flex';
+        document.getElementById('auth-pass').value = '';
+        document.getElementById('auth-pass').placeholder = 'New password';
+        document.getElementById('auth-main-btn').textContent = 'Reset Password';
+        document.getElementById('auth-main-btn').setAttribute('onclick', 'resetPassword()');
+      } catch (error) {
+        console.error(error);
+        alert('OTP email send nahi ho paya. EmailJS settings check karein.');
+      }
+    }
+
+    function resetPassword() {
+      const username = normalizeLoginId(document.getElementById('auth-user').value);
+      const password = document.getElementById('auth-pass').value;
+      const otp = document.getElementById('auth-otp').value.trim();
+      if (!username || !otp || !password) { alert('Login ID, OTP aur naya password daalein'); return; }
+      if (username !== resetOtpUser || otp !== resetOtp || Date.now() > resetOtpExpiresAt) {
+        alert('OTP galat hai ya expire ho gaya hai');
+        return;
+      }
+      const users = readUsers();
+      if (!users[username]) { alert('Ye login ID nahi mila'); return; }
+      users[username].password = encodePassword(password);
+      users[username].updatedAt = new Date().toISOString();
+      writeUsers(users);
+      alert('Password reset ho gaya. Ab login karein.');
+      document.getElementById('auth-pass').value = '';
+      document.getElementById('auth-pass').placeholder = 'Password';
+      setAuthMode('login');
+    }
+
+    function logout() {
+      localStorage.removeItem(AUTH_SESSION_KEY);
+      location.reload();
+    }
+
+    function initAuth() {
+      if (!currentUser) {
+        document.body.classList.add('auth-locked');
+        setAuthMode('login');
+        return false;
+      }
+      document.body.classList.remove('auth-locked');
+      document.getElementById('current-user-label').textContent = currentUser;
+      return true;
+    }
+
+    function loadSavedStore() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) return structuredClone(defaultStore);
+        const parsed = JSON.parse(saved);
+        return {
+          sales: Array.isArray(parsed.sales) ? parsed.sales : structuredClone(defaultStore.sales),
+          purchases: Array.isArray(parsed.purchases) ? parsed.purchases : structuredClone(defaultStore.purchases),
+          customers: Array.isArray(parsed.customers) ? parsed.customers : structuredClone(defaultStore.customers),
+          vendors: Array.isArray(parsed.vendors) ? parsed.vendors : structuredClone(defaultStore.vendors),
+          products: Array.isArray(parsed.products) ? parsed.products : structuredClone(defaultStore.products)
+        };
+      } catch (error) {
+        console.warn('Saved data load nahi ho paya, default data use ho raha hai.', error);
+        return structuredClone(defaultStore);
+      }
+    }
+
+    function saveData() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...store, invoiceCounters }));
+    }
+
+    function getNextCounter(prefix, rows) {
+      const numbers = rows.map(row => {
+        const match = String(row.invoiceNo || '').match(new RegExp('^' + prefix + '0*(\\d+)$'));
+        return match ? Number(match[1]) : 0;
+      });
+      return Math.max(0, ...numbers) + 1;
+    }
+
+    function loadInvoiceCounters() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        if (saved.invoiceCounters?.sale && saved.invoiceCounters?.purchase) return saved.invoiceCounters;
+      } catch (error) {}
+      return {
+        sale: getNextCounter('INV-', store.sales),
+        purchase: getNextCounter('PUR-', store.purchases)
+      };
+    }
+
+    invoiceCounters = loadInvoiceCounters();
 
     function calcItem(i) {
       const qty = parseFloat(i.qty) || 0;
@@ -1383,6 +1653,7 @@
           }
         });
       }
+      saveData();
       closeModal();
       renderTable(isSale ? 'sales' : 'purchase');
       if (activeLedgerCustomer) renderCustomerLedger();
@@ -1392,6 +1663,7 @@
     function deleteEntry(idx, type) {
       if (!confirm('Delete karna chahte hain?')) return;
       if (type === 'sales') store.sales.splice(idx, 1); else store.purchases.splice(idx, 1);
+      saveData();
       renderTable(type);
       if (activeLedgerCustomer && type === 'sales') renderCustomerLedger();
     }
@@ -1409,6 +1681,7 @@
       const p = { name, phone: document.getElementById('p-phone').value, gstin: document.getElementById('p-gstin').value, address: document.getElementById('p-address').value };
       if (currentPartyType === 'customer') { store.customers.push(p); renderParties('customers'); }
       else { store.vendors.push(p); renderParties('vendors'); }
+      saveData();
       closePartyModal();
     }
 
@@ -1440,6 +1713,7 @@
       };
       if (editProductIndex >= 0) store.products[editProductIndex] = product;
       else store.products.push(product);
+      saveData();
       closeProductModal();
       renderProducts();
       updateProductList();
@@ -1448,6 +1722,7 @@
     function deleteProduct(idx) {
       if (!confirm('Product delete karna chahte hain?')) return;
       store.products.splice(idx, 1);
+      saveData();
       renderProducts();
       updateProductList();
     }
@@ -1462,8 +1737,10 @@
       if (e.key === 'Escape') { closeModal(); closePartyModal(); closeProductModal(); closeCustomerLedger(); closeInvoiceView(); }
     });
 
-    updateProductList();
-    renderDashboard();
+    if (initAuth()) {
+      updateProductList();
+      renderDashboard();
+    }
   </script>
 </body>
 </html>
